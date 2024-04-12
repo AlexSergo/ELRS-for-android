@@ -9,6 +9,7 @@
         tools:context=".MainActivity">
 
     <Switch
+            android:visibility="gone"
             android:text="Manual"
             android:rotation="90"
             android:layout_width="wrap_content"
@@ -49,23 +50,24 @@
     <Button
             android:text="Connect"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:id="@+id/openSerialButton"
-            android:onClick="openSerial"
+            android:layout_height="wrap_content"
+            android:id="@+id/openSerialButton"
             android:rotation="90"
             app:layout_constraintStart_toStartOf="parent"
             android:layout_marginStart="4dp" android:layout_marginBottom="56dp"
             app:layout_constraintBottom_toTopOf="@+id/rightJoystick"/>
+
     <TextView
             android:text="0"
             android:keepScreenOn="true"
             android:rotation="90"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:id="@+id/testView"
-            app:layout_constraintEnd_toEndOf="parent" app:layout_constraintBottom_toBottomOf="parent"
-            android:layout_marginBottom="380dp"
-            app:layout_constraintTop_toTopOf="parent" android:layout_marginTop="332dp"
-            app:layout_constraintVertical_bias="0.48000002"
-    />
+            android:layout_height="wrap_content"
+            android:id="@+id/testView"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
     <Button
             android:text="Use Gyro"
             android:rotation="90"
@@ -75,6 +77,7 @@
             app:layout_constraintStart_toEndOf="@+id/openSerialButton" android:layout_marginBottom="56dp"
             app:layout_constraintBottom_toTopOf="@+id/rightJoystick"/>
     <Switch
+            android:visibility="gone"
             android:text="Arm"
             android:rotation="90"
             android:layout_width="wrap_content"

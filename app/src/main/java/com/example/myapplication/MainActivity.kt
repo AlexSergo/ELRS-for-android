@@ -2,22 +2,31 @@ package com.example.myapplication
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.usb.UsbManager
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.view.View
 import android.widget.Button
 import android.widget.Switch
 import android.widget.TableLayout
 import android.widget.TableRow
 import android.widget.TextView
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.get
-import cn.wch.ch34xuartdriver.CH34xUARTDriver
+import com.example.myapplication.com.example.myapplication.LocalService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.lang.Thread.sleep
 import kotlin.math.asin
 import kotlin.math.atan2
@@ -58,8 +67,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private lateinit var serialDriver: CH34xUARTDriver
-    private var serialOpened = false
 
     private lateinit var bytes: ByteArray
     private val crsfData: CRSFData = CRSFData()
@@ -68,18 +75,49 @@ class MainActivity : AppCompatActivity() {
     private lateinit var leftJoyStick: Joystick
     private lateinit var rightJoyStick: Joystick
 
+    private var myService: LocalService? = null
+
     private lateinit var manualSwitch: Switch
 
     fun duty2CRSF(duty:Float)=(duty * 1639 + 172).toInt()
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as LocalService.LocalBinder
+            myService = binder.service
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            myService = null
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onStart() {
+        super.onStart()
+        Intent(this, LocalService::class.java).also { service ->
+            startForegroundService(service)
+            bindService(service, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        unbindService(serviceConnection)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val sensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
 
+        val z = findViewById<Button>(R.id.openSerialButton)
+        z.setOnClickListener {
+            openSerial()
+        }
+
         sensorManager.registerListener(MyListener(this::sensorCallBack), sensor, 10000);
-        serialDriver =
-            CH34xUARTDriver(getSystemService(USB_SERVICE) as UsbManager, this, "cn.wch.wchusbdriver.USB_PERMISSION")
 
         //bytes=getTestByteArray("C8 18 16 E0 03 1F 2B C0 F7 8B 5F FC E2 17 E5 2B 5F F9 CA 07 00 00 44 3C E2 B8")
         leftJoyStick = findViewById<Joystick>(R.id.leftJoystick)
@@ -138,60 +176,10 @@ class MainActivity : AppCompatActivity() {
         return result
     }
 
-    private fun openUartDevice(): Boolean {
-        val ret = serialDriver.ResumeUsbList()
-        if (ret == -1) {
-            debugInfo("No Uart Device!")
-            return false
-        }
-
-        if (!serialDriver.UartInit()) {
-            debugInfo("Fail to Open Uart Device!")
-            return false
-        }
-        val config_ret = serialDriver.SetConfig(460800, 8, 1, 0, 0)
-        if(config_ret){
-            serialOpened = true
-            bytes = crsfData.pack().toByteArray()
-            for (i in 0..500) {
-                uartWrite(bytes, 26)
-                sleep(10)
-            }
-            bytes = crsfData.packCmd(0x01u,0x00u).toByteArray()
-            for(i in 0..10){
-                uartWrite(bytes, 8)
-                sleep(10)
-            }
-            debugInfo("config ret:$config_ret")
-        }
-
-        //debugInfo("config ret:$config_ret")
-        return true
-    }
-
-    private fun uartWrite(bytearr: ByteArray, len: Int) {
-        if (!serialOpened) {
-            return
-        }
-
-        val ret = serialDriver.WriteData(bytearr, len)
-        if (ret < 0) {
-            debugInfo("Uart device disconnected!")
-            serialOpened = false
-            findViewById<Button>(R.id.openSerialButton).isEnabled = true
-            try {
-                serialDriver.CloseDevice()
-            } catch (e: java.lang.Exception) {
-                debugInfo(e.toString())
-            }
-        }
-    }
 
     /** Called when the user taps the Send button */
-    fun openSerial(view: View) {
-        if (!openUartDevice()) {
-            return
-        }
+    fun openSerial() {
+        myService?.tryToConnectToUsb()
         findViewById<Button>(R.id.openSerialButton).isEnabled = false
     }
 
@@ -224,27 +212,24 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n")
     fun sensorCallBack(listen: MyListener) {
-        val channel_text = crsfData.data_array.map { "$it" }.joinToString("  ")
-        findViewById<TextView>(R.id.testView).text = channel_text + "\nroll ${listen.roll} \npitch:${listen.pitch}" +
-                "\nyaw:${listen.yaw}"
+            val channel_text = crsfData.data_array.map { "$it" }.joinToString("  ")
+            findViewById<TextView>(R.id.testView).text = channel_text
 
-        if (useGyroControl) {
-            val tempRoll = constrain(-130f, -50f, listen.pitch) + 50
-            val tempPitch = constrain(-40f, 40f, listen.roll) + 40
+            if (useGyroControl) {
+                val tempRoll = constrain(-130f, -50f, listen.pitch) + 50
+                val tempPitch = constrain(-40f, 40f, listen.roll) + 40
 
-            crsfData.data_array[0] = duty2CRSF(1 + tempRoll / 80)   // raw:0~-180
-            crsfData.data_array[1] = duty2CRSF(tempPitch / 80)  // raw:-90~90
-            rightJoyStick.setXY((1 + tempRoll / 80) * 2 - 1, (tempPitch / 80) * 2 - 1)
-        }
+                crsfData.data_array[0] = duty2CRSF(1 + tempRoll / 80)   // raw:0~-180
+                crsfData.data_array[1] = duty2CRSF(tempPitch / 80)  // raw:-90~90
+                rightJoyStick.setXY((1 + tempRoll / 80) * 2 - 1, (tempPitch / 80) * 2 - 1)
+            }
 
-        if(manualSwitch.isChecked){
-            //crsfData.data_array[7]=1500
-        }else{
-            //crsfData.data_array[7]=500
-        }
-        if (serialOpened) {
+            if (manualSwitch.isChecked) {
+                //crsfData.data_array[7]=1500
+            } else {
+                //crsfData.data_array[7]=500
+            }
             bytes = crsfData.pack().toByteArray()
-            uartWrite(bytes, 26)
-        }
+            myService?.sendToPort(bytes)
     }
 }
